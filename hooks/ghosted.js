@@ -217,6 +217,8 @@ function judge(head, recent, prompt, sessionId) {
     '"detail": how much answering it well depends on the specific details of the last few messages. 9-10: it continues,',
     '   fixes, retries, checks, ships or questions exactly that work, gives feedback on its result, pastes its error or output,',
     '   or points back at it ("keep going", "push", "the tests failed", "I am missing the X", "why did that not work").',
+    '   Pasted code, commands, logs or output about the subject of the recent messages also continue that work (9-10),',
+    '   even with no words of the user\'s own around them: people paste a snippet to test, debug or discuss what they are on.',
     '   4-6: a new step whose details would help but a short summary would do. 0-2: a separate job or question.',
     '"history": how much it needs anything from the earlier conversation at all. 8-10: same project, product or subject',
     '   and it needs what was learned (paths, decisions, how things work). 3-5: only a few facts. 0-2: nothing; unrelated.',
@@ -305,6 +307,7 @@ const HELP = `ghosted_ commands
   /ghosted terse [lite|full|off|auto]   shorter answers (auto = lite, off when caveman is active)
   /ghosted warm [<time>|off]       keep the cache warm after your last turn (default 1h)
   /ghosted setup [off]             auto-typing in any terminal (VS Code, Ghostty, Alacritty)
+  /ghosted test-keys               check that ghosted_ can type into this terminal
   /ghosted reset                   back to the /config settings
   new: <prompt> / same: <prompt>   force or block a task switch
   /resume                          go back to the chat before a switch`;
@@ -365,6 +368,8 @@ function command(args) {
     return f.length ? `ghosted_ added a \`claude\` shell function to ${f.join(', ')}. Open a new terminal: from then on, ghosted_ starts your tasks automatically in any terminal app. Undo: /ghosted setup off`
       : 'No shell config found (zsh, bash or fish).';
   }
+  if (verb === 'test-keys') return OFF ? 'ghosted_ is paused; run /ghosted on, then /ghosted test-keys.'
+    : 'The typing test runs from the prompt hook, which did not see this message. Type /ghosted test-keys on its own as your message.';
   if (verb === 'reset') { fs.rmSync(OVERRIDES_FILE, { force: true }); return 'ghosted_ overrides cleared; /config settings apply.'; }
   if (verb === 'stats' || verb === 'dashboard') {
     const ev = jsonl(path.join(DATA_DIR, 'events.jsonl')), costs = jsonl(path.join(DATA_DIR, 'judge-costs.jsonl'));
@@ -392,6 +397,7 @@ function command(args) {
   if (verb === 'status') {
     return [
       `ghosted_ ${OFF ? 'PAUSED' : 'on'} · terse ${TERSE_SETTING}${TERSE_SETTING === 'auto' ? ` (${TERSE})` : ''} · keep warm ${WARM_MS ? `${WARM_MS / 60e3}m` : 'off'}`,
+      ...[lastTyping()].filter(Boolean),
       '', HELP.split('\n').slice(2).join('\n'),
     ].join('\n');
   }
@@ -509,9 +515,14 @@ function typeLater(steps) {
   }
   let child;
   if (WIN) {
-    // the helper attaches to the console of Claude Code (an ancestor of this hook) and writes key events into it
+    // the helper attaches to the console of Claude Code (an ancestor of this hook) and writes key events into it;
+    // it logs the outcome to events.jsonl, so /ghosted test-keys and /ghosted stats can tell why typing failed
+    const pids = ancestorPids();
+    if (!pids.length) { logEvent('type', null, { ok: false, method: 'console', errors: 'no ancestor pids found' }); return false; }
+    privateDir(DATA_DIR);
     child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'type-keys.ps1'),
-      '-Steps', Buffer.from(JSON.stringify(steps)).toString('base64'), '-Pids', ancestorPids().join(',')], { detached: true, stdio: 'ignore', windowsHide: true });
+      '-Steps', Buffer.from(JSON.stringify(steps)).toString('base64'), '-Pids', pids.join(','), '-Log', path.join(DATA_DIR, 'events.jsonl')],
+    { detached: true, stdio: 'ignore', windowsHide: true });
   } else return false;
   child.on('error', () => {});
   child.unref();
@@ -695,6 +706,7 @@ function takeRetyped(prompt) {
 function onPrompt(input) {
   const prompt = (input.prompt || '').trim();
   if (OFF || process.env.GHOSTED_CHILD || process.env.GHOSTED_WARMING) return;
+  if (/^\/ghosted(:ghosted)?\s+test-keys\s*$/i.test(prompt)) return testKeys();
   // `!` is Claude Code's shell mode, so the overrides are plain-word prefixes.
   if ((prompt.startsWith('/') && !taskCommand(prompt)) || /^same:/i.test(prompt) || prompt === RESUME_TEXT) return;
   // Messages Claude Code injects (<task-notification>, <agent-message>, ...) report on the current work: never a switch.
@@ -766,6 +778,28 @@ function onPrompt(input) {
   return 'blocked';
 }
 
+// /ghosted test-keys: runs the typing a task switch uses, from this hook, but types a marker without submitting it.
+// Handled here and not in the skill: a model tool call has other ancestors than a hook, so it would test something else.
+const TEST_TEXT = 'ghosted_ typing works';
+function testKeys() {
+  const typed = typeLater([[1.2, '\x03'], [0.4, TEST_TEXT]]); // Ctrl-C first: Claude Code puts the blocked command back
+  const reason = typed
+    ? `ghosted_ typing test: in about 2 seconds your input should read "${TEST_TEXT}" (not sent; Ctrl-C clears it). `
+      + 'If it does, task switches start by themselves here. If not, run /ghosted to see what went wrong.'
+    : WIN ? 'ghosted_ typing test: failed before typing (could not find the console of Claude Code). Run /ghosted for details.'
+    : 'ghosted_ typing test: ghosted_ cannot type into this terminal. Run /ghosted setup once, open a new terminal, and test again.';
+  process.stdout.write(JSON.stringify({ decision: 'block', reason }));
+  return 'blocked';
+}
+
+// The outcome of the last Windows typing attempt, for /ghosted.
+function lastTyping() {
+  const t = jsonl(path.join(DATA_DIR, 'events.jsonl')).filter(e => e.kind === 'type').pop();
+  if (!t) return null;
+  return `last typing ${t.ts.slice(0, 16).replace('T', ' ')}: ${t.ok ? `ok (console of pid ${t.attached}, ${t.written} key events)`
+    : `FAILED${t.attached ? ` after attaching to pid ${t.attached} (${t.written}/${t.records} key events written)` : ''}: ${String(t.errors || 'unknown error').replace(/;\s*$/, '')} (tried pids ${t.pids || 'none'})`}`;
+}
+
 function writeJson(file, data) { fs.writeFileSync(file, JSON.stringify(data), PRIVATE); }
 
 function onResume(input) {
@@ -780,7 +814,8 @@ function onResume(input) {
       : 'ghosted cleared the conversation because the user started a new, unrelated task.',
     pending.carry ? `${pending.related ? 'Handoff notes from the earlier work' : 'Facts from the earlier work that may matter'}:\n${pending.carry}` : '',
     pending.archive ? `The earlier conversation is saved verbatim at ${pending.archive}; read it only if the new task needs something from it.` : '',
-    `The user's next task (verbatim), to start on their next message:\n\n${pending.prompt}`,
+    `The user's next message (verbatim), to act on when they next write. Treat it as if they had just sent it: code,`
+      + ` commands or logs they pasted are material to read, not a request to run them, unless their own words ask for that:\n\n${pending.prompt}`,
   ];
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: parts.filter(Boolean).join('\n\n') },

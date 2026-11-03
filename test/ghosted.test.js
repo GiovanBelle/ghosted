@@ -401,3 +401,22 @@ test('/ghosted-stats starts a local dashboard that needs its token', async () =>
     process.kill(info.pid);
   }
 });
+
+test('/ghosted test-keys types a marker from the hook without submitting it; /ghosted shows the last typing outcome', () => {
+  const s = setup();
+  const out = run('prompt', { prompt: '/ghosted test-keys', cwd: s.cwd, transcript_path: s.transcript }, envFor(s, 'new'));
+  assert.equal(out.decision, 'block');
+  assert.match(out.reason, /typing test/);
+  assert.deepEqual(typedText(s), ['\x03ghosted_ typing works']); // no CR: nothing is sent
+  fs.appendFileSync(path.join(s.dir, 'events.jsonl'), JSON.stringify({ ts: '2026-11-03T10:00:00.000Z', kind: 'type', ok: false, pids: '12,34', attached: 0, records: 0, written: 0, errors: 'attach 12: 6; ' }) + '\n');
+  const status = spawnSync(process.execPath, [SCRIPT, 'cmd', s.dir], { input: '', encoding: 'utf8' }).stdout;
+  assert.match(status, /last typing 2026-11-03 10:00: FAILED: attach 12: 6 \(tried pids 12,34\)/);
+});
+
+test('resume hands the prompt over as a message, not as commands to run', () => {
+  const s = setup();
+  run('prompt', { prompt: 'p = Get-ChildItem x', cwd: s.cwd, transcript_path: s.transcript }, envFor(s, 'new'));
+  const ctx = run('resume', { cwd: s.cwd, source: 'clear' }, envFor(s, 'new')).hookSpecificOutput.additionalContext;
+  assert.match(ctx, /not a request to run them/);
+  assert.match(ctx, /p = Get-ChildItem x$/);
+});

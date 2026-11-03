@@ -12,4 +12,25 @@ $reader.WaitForExit(20000) | Out-Null
 $got = Get-Content $out -Raw | ConvertFrom-Json
 Write-Host "received: $([Text.RegularExpressions.Regex]::Escape($got))"
 if ($got -ne "$([char]3)/compact hi`r`r") { throw "unexpected input: $got" }
-Write-Host 'ok'
+Write-Host "type-keys.ps1 ok"
+
+# The whole path a task switch takes, started by the prompt hook as Claude Code runs it (/ghosted test-keys):
+# once in a normal console, once in a pseudo console like the one Windows OpenSSH (sshd) gives a session.
+foreach ($host_ in 'console', 'conpty') {
+    $data = Join-Path $env:RUNNER_TEMP "ghosted-$host_"
+    New-Item -ItemType Directory -Force $data | Out-Null
+    $res = Join-Path $data 'result.json'
+    $node = (Get-Command node).Source
+    $child = "`"$node`" `"$PSScriptRoot\hook-child.js`" `"$res`" `"$data`""
+    if ($host_ -eq 'console') {
+        $p = Start-Process $node -ArgumentList @("$PSScriptRoot\hook-child.js", $res, $data) -PassThru
+        $p.WaitForExit(60000) | Out-Null
+    } else {
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$PSScriptRoot\conpty.ps1" -Command $child
+    }
+    Write-Host "[$host_] result: $(Get-Content $res -Raw -ErrorAction SilentlyContinue)"
+    Write-Host "[$host_] events: $(Get-Content (Join-Path $data 'events.jsonl') -Raw -ErrorAction SilentlyContinue)"
+    $r = Get-Content $res -Raw | ConvertFrom-Json
+    if ($r.code -ne 0) { throw "[$host_] the hook's typing never arrived" }
+    Write-Host "[$host_] ok"
+}

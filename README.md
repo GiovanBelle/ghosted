@@ -93,6 +93,8 @@ The slash menu shows plugin commands with a prefix (`/ghosted:ghosted`); typing 
 | Windows console, Windows Terminal | yes | yes (`WriteConsoleInput`, tested in CI) | yes (ConPTY, tested in CI) |
 | macOS Terminal.app, VS Code terminal, Ghostty, Alacritty, any other terminal | yes | yes, after running `/ghosted setup` once (macOS, Linux) | yes |
 
+Not sure it can type into yours? Send `/ghosted test-keys` as a message: ghosted_ types a short marker into your input (without sending it), and `/ghosted` then shows how the last attempt went.
+
 Needs Node.js and the `claude` CLI on your PATH. Cache warming and the terminal bridge use `python3` on macOS and Linux. No other dependencies.
 
 **Terminal bridge.** VS Code's terminal, Ghostty and Alacritty give outside programs no way to type into them. `/ghosted setup` adds a small `claude` function to your shell config (zsh, bash or fish). It runs Claude Code through a pass-through pseudo-terminal with a private pipe for ghosted_'s keystrokes, the way tmux would. Everything you type and see is unchanged. It falls back to plain `claude` whenever python3 or the script is missing. `/ghosted setup off` removes it.
