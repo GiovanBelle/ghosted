@@ -34,5 +34,11 @@ foreach ($host_ in 'console', 'conpty') {
     Write-Host "[$host_] debug: $(Get-Content (Join-Path $data 'debug.log') -Raw -ErrorAction SilentlyContinue)"
     $r = Get-Content $res -Raw | ConvertFrom-Json
     if ($r.code -ne 0) { throw "[$host_] the hook's typing never arrived" }
+    # type-keys.ps1 logs after the last key event: give it a moment, then expect a successful line
+    $log = Join-Path $data 'events.jsonl'
+    for ($i = 0; $i -lt 20 -and -not (Select-String -Path $log -Pattern '"kind":"type"' -Quiet -ErrorAction SilentlyContinue); $i++) { Start-Sleep -Milliseconds 500 }
+    $line = Get-Content $log -ErrorAction SilentlyContinue | Where-Object { $_ -match '"kind":"type"' } | Select-Object -Last 1
+    Write-Host "[$host_] logged: $line"
+    if (-not ($line -match '"ok":true')) { throw "[$host_] type-keys.ps1 did not log a successful run" }
     Write-Host "[$host_] ok"
 }

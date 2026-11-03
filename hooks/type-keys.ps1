@@ -28,6 +28,7 @@ public static class Keys {
 
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool FreeConsole();
     [DllImport("kernel32.dll", SetLastError = true)] static extern bool AttachConsole(uint pid);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetConsoleCtrlHandler(IntPtr handler, bool add);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     static extern IntPtr CreateFile(string name, uint access, uint share, IntPtr sa, uint disp, uint flags, IntPtr tmpl);
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
@@ -45,7 +46,8 @@ public static class Keys {
             if (!AttachConsole(pid)) { Errors += "attach " + pid + ": " + Marshal.GetLastWin32Error() + "; "; continue; }
             // GENERIC_READ|GENERIC_WRITE, FILE_SHARE_READ|FILE_SHARE_WRITE, OPEN_EXISTING
             input = CreateFile("CONIN$", 0xC0000000, 3, IntPtr.Zero, 3, 0, IntPtr.Zero);
-            if (input != new IntPtr(-1)) return pid;
+            // the Ctrl-C it types reaches every process on that console, this one too: ignore it
+            if (input != new IntPtr(-1)) { SetConsoleCtrlHandler(IntPtr.Zero, true); return pid; }
             Errors += "CONIN$ " + pid + ": " + Marshal.GetLastWin32Error() + "; ";
             FreeConsole();
         }
