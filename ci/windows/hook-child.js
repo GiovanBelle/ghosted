@@ -8,7 +8,8 @@ let got = '';
 process.stdin.setRawMode(true);
 process.stdin.on('data', d => {
   got += d.toString('utf8');
-  if (got.includes('ghosted_ typing works')) finish(0);
+  // stay a moment: closing the console would also end type-keys.ps1 before it logs, which Claude Code's console never does
+  if (got.includes('ghosted_ typing works')) setTimeout(() => finish(0), 4000);
 });
 let reply = '', errors = '';
 function finish(code) {
