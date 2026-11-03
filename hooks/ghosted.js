@@ -504,26 +504,19 @@ function typeLater(steps) {
     fs.appendFileSync(process.env.GHOSTED_DRY_TYPE, JSON.stringify(steps) + '\n'); // one JSON line per call
     return true;
   }
-  const term = terminalTarget();
-  if (term) {
-    const child = spawn(process.execPath, [__filename, 'type'], {
-      detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, GHOSTED_TYPE_JOB: JSON.stringify({ term, steps }) },
-    });
-    child.on('error', () => {});
-    child.unref();
-    return true;
-  }
-  let child;
-  if (WIN) {
-    // the helper attaches to the console of Claude Code (an ancestor of this hook) and writes key events into it;
-    // it logs the outcome to events.jsonl, so /ghosted test-keys and /ghosted stats can tell why typing failed
+  let term = terminalTarget();
+  if (!term && WIN) {
+    // Windows consoles: type-keys.ps1 attaches to the console of Claude Code (an ancestor of this hook) and writes
+    // key events into it. It runs from a detached node helper: powershell.exe started detached (no console at all)
+    // exits before running the script.
     const pids = ancestorPids();
     if (!pids.length) { logEvent('type', null, { ok: false, method: 'console', errors: 'no ancestor pids found' }); return false; }
-    privateDir(DATA_DIR);
-    child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'type-keys.ps1'),
-      '-Steps', Buffer.from(JSON.stringify(steps)).toString('base64'), '-Pids', pids.join(','), '-Log', path.join(DATA_DIR, 'events.jsonl')],
-    { detached: true, stdio: process.env.GHOSTED_DEBUG ? ['ignore', ...Array(2).fill(fs.openSync(path.join(DATA_DIR, 'type-keys.log'), 'a'))] : 'ignore', windowsHide: true });
-  } else return false;
+    term = { kind: 'console', pids };
+  }
+  if (!term) return false;
+  const child = spawn(process.execPath, [__filename, 'type'], {
+    detached: true, stdio: 'ignore', windowsHide: true, env: { ...process.env, GHOSTED_TYPE_JOB: JSON.stringify({ term, steps }) },
+  });
   child.on('error', () => {});
   child.unref();
   return true;
@@ -580,6 +573,16 @@ const nap = ms => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, M
 // Runs detached after the hook returned: waits, then sends each step to the terminal.
 // Text and a CR go out as separate sends, so the CR is a key press, not part of a paste.
 function typeSteps({ term, steps }) {
+  if (term.kind === 'console') {
+    // It logs its own outcome to events.jsonl (exit 1: could not attach, 2: not every key event was written).
+    privateDir(DATA_DIR);
+    const out = process.env.GHOSTED_DEBUG ? fs.openSync(path.join(DATA_DIR, 'type-keys.log'), 'a') : 'ignore';
+    const r = spawnSync('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'type-keys.ps1'),
+      '-Steps', Buffer.from(JSON.stringify(steps)).toString('base64'), '-Pids', term.pids.join(','), '-Log', path.join(DATA_DIR, 'events.jsonl')],
+    { stdio: ['ignore', out, out], windowsHide: true, timeout: 60000 });
+    if (![0, 1, 2].includes(r.status)) logEvent('type', null, { ok: false, method: 'console', pids: term.pids.join(','), errors: `powershell.exe ${r.error ? r.error.message : `exited ${r.status}`}` });
+    return;
+  }
   const send = (chunk) => {
     const cr = chunk === '\r', cc = chunk === '\x03';
     if (term.kind === 'bridge') {
