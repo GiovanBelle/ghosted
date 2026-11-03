@@ -522,7 +522,7 @@ function typeLater(steps) {
     privateDir(DATA_DIR);
     child = spawn('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', path.join(__dirname, 'type-keys.ps1'),
       '-Steps', Buffer.from(JSON.stringify(steps)).toString('base64'), '-Pids', pids.join(','), '-Log', path.join(DATA_DIR, 'events.jsonl')],
-    { detached: true, stdio: 'ignore', windowsHide: true });
+    { detached: true, stdio: process.env.GHOSTED_DEBUG ? ['ignore', ...Array(2).fill(fs.openSync(path.join(DATA_DIR, 'type-keys.log'), 'a'))] : 'ignore', windowsHide: true });
   } else return false;
   child.on('error', () => {});
   child.unref();

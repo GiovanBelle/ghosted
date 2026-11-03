@@ -30,6 +30,7 @@ foreach ($host_ in 'console', 'conpty') {
     }
     Write-Host "[$host_] result: $(Get-Content $res -Raw -ErrorAction SilentlyContinue)"
     Write-Host "[$host_] events: $(Get-Content (Join-Path $data 'events.jsonl') -Raw -ErrorAction SilentlyContinue)"
+    Write-Host "[$host_] type-keys: $(Get-Content (Join-Path $data 'type-keys.log') -Raw -ErrorAction SilentlyContinue)"
     Write-Host "[$host_] debug: $(Get-Content (Join-Path $data 'debug.log') -Raw -ErrorAction SilentlyContinue)"
     $r = Get-Content $res -Raw | ConvertFrom-Json
     if ($r.code -ne 0) { throw "[$host_] the hook's typing never arrived" }
