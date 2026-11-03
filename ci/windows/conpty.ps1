@@ -49,6 +49,8 @@ public static class ConPty {
 
         var si = new STARTUPINFOEX();
         si.StartupInfo.cb = Marshal.SizeOf(si);
+        // STARTF_USESTDHANDLES with null handles: otherwise the child inherits this script's redirected pipes, not the pseudo console
+        si.StartupInfo.dwFlags = 0x00000100;
         IntPtr size = IntPtr.Zero;
         InitializeProcThreadAttributeList(IntPtr.Zero, 1, 0, ref size);
         si.lpAttributeList = Marshal.AllocHGlobal(size);
