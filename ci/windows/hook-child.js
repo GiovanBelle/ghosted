@@ -10,16 +10,17 @@ process.stdin.on('data', d => {
   got += d.toString('utf8');
   if (got.includes('ghosted_ typing works')) finish(0);
 });
+let reply = '', errors = '';
 function finish(code) {
-  fs.writeFileSync(out, JSON.stringify({ code, received: got }));
+  fs.writeFileSync(out, JSON.stringify({ code, received: got, hook: reply, stderr: errors }));
   process.exit(code);
 }
 const hook = spawn(`"${process.execPath}" "${path.join(__dirname, '..', '..', 'hooks', 'ghosted.js')}" prompt`, {
   shell: true, windowsHide: true, stdio: ['pipe', 'pipe', 'pipe'],
-  env: { ...process.env, CLAUDE_PLUGIN_DATA: data, GHOSTED_DRY_TYPE: '' },
+  env: { ...process.env, CLAUDE_PLUGIN_DATA: data, GHOSTED_DRY_TYPE: '', GHOSTED_DEBUG: '1' },
 });
 hook.stdin.end(JSON.stringify({ prompt: '/ghosted test-keys', cwd: process.cwd(), session_id: 'ci' }));
-let reply = '';
 hook.stdout.on('data', d => { reply += d; });
+hook.stderr.on('data', d => { errors += d; });
 hook.on('exit', () => { process.stdout.write(`hook: ${reply}\n`); });
 setTimeout(() => finish(1), 45000);
